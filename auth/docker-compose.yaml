@@ -1,0 +1,41 @@
+version: "3.8"
+
+x-env: &x-env
+  env_file:
+    - deploys/${ENVFILE:-compose}.env
+
+services:
+  auth_api:
+    build: .
+    image: auth_api
+    restart: always
+    <<: *x-env
+    depends_on:
+      - postgres
+      - redis
+    ports:
+      - 5555:5000
+
+  postgres:
+    image: postgres:12.1
+    restart: always
+    <<: *x-env
+    environment:
+      POSTGRES_PASSWORD: devpass
+    volumes:
+      - postgresdb:/var/lib/postgresql/data
+    ports:
+      - 5432:5432
+
+
+  redis:
+    image: redis:6-alpine
+    restart: always
+    volumes:
+      - redisdata:/data
+    ports:
+      - 6379:6379
+
+volumes:
+  redisdata:
+  postgresdb:
