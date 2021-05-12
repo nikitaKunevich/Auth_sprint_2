@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from services.film import FilmService, get_film_service
 from services.person import PersonService, get_person_service
 from starlette.requests import Request
+from utils import can_read_suspicious
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -54,7 +55,7 @@ async def person_films(
 ) -> List[FilmShort]:
     person = await person_service.get_by_id(str(person_id))
     person_films = await film_service.bulk_get_by_ids(
-        person.film_ids, filter_suspicious=not request.user.is_authenticated
+        person.film_ids, filter_suspicious=not can_read_suspicious(request.auth)
     )
     if not person_films:
         raise HTTPException(

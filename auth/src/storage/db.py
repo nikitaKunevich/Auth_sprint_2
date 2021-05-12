@@ -1,5 +1,6 @@
 import logging
 
+import permissions
 from config import config
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, scoped_session, sessionmaker
@@ -16,5 +17,10 @@ def init_db():
 
     Base.metadata.create_all(bind=engine)
     if not session.query(storage.db_models.Role).filter_by(name="admin").one_or_none():
-        session.add(storage.db_models.Role(name="admin", description="Admin user"))
+        admin_role = storage.db_models.Role(
+            name="admin",
+            description="Admin user",
+            permissions=list(permissions.Permissions),
+        )
+        session.add(admin_role)
         session.commit()

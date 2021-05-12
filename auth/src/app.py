@@ -78,6 +78,6 @@ def create_app():
 
     @jwt.additional_claims_loader
     def add_claims_to_access_token(user: User):
-        return {"roles": [role.name for role in user.roles]}
+        return {"permissions": [permission for permission in user.permissions]}
 
     return app

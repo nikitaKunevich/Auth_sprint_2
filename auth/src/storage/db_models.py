@@ -4,10 +4,11 @@ from datetime import datetime
 from typing import Optional
 
 from api.models import UserLoginRecord
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import backref, relationship
 from storage.db import Base, session
+from werkzeug.exceptions import NotFound
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,13 @@ class User(Base):
         logger.debug(f"{user=}")
         return user
 
+    @property
+    def permissions(self):
+        permissions_set = set()
+        for role in self.roles:
+            permissions_set.update(role.permissions)
+        return list(permissions_set)
+
 
 class ThirdPartyAccount(Base):
     __tablename__ = "third_party_accounts"
@@ -76,6 +84,8 @@ class ThirdPartyAccount(Base):
     user = relationship(
         "User", backref=backref("third_party_accounts", cascade="all, delete-orphan")
     )
+    third_party_name = Column(String)
+    user_info = Column(JSON)
 
     def __repr__(self):
         return f"{self.__class__.__name__}: {self.id} (user_id: {self.user.id})"
@@ -85,7 +95,20 @@ class Role(Base):
     __tablename__ = "roles"
     id = Column(Integer, primary_key=True, unique=True)
     name = Column(String(80), unique=True)
-    description = Column(String(255))
+    description = Column(String(255), nullable=True)
+    permissions = Column(ARRAY(String, dimensions=1), default=[])
+
+    @classmethod
+    def get(cls, name):
+        role = session.query(cls).filter_by(name=name).one_or_none()
+        if not role:
+            raise NotFound(f"Role with name {name} is not found")
+
+    # permissions = relationship(
+    #     "Permission",
+    #     secondary="roles_permisssions",
+    #     backref=backref("roles", lazy="dynamic"),
+    # )
 
     def __repr__(self):
         return f"{self.__class__.__name__}: {self.name}({self.id}) - {self.description}"
@@ -96,6 +119,25 @@ class RolesUsers(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column("user_id", UUID(as_uuid=True), ForeignKey("users.id"))
     role_id = Column("role_id", Integer, ForeignKey("roles.id"))
+
+
+#
+# class Permission(Base):
+#     __tablename__ = "permissions"
+#     id = Column(Integer, primary_key=True, unique=True)
+#     name = Column(String(80), unique=True)
+#     description = Column(String(255), nullable=True)
+#
+#     def __repr__(self):
+#         return f"{self.__class__.__name__}: {self.name}({self.id}) - {self.description}"
+
+#
+# class RolesPermissions(Base):
+#     __tablename__ = "roles_permisssions"
+#     id = Column(Integer, primary_key=True)
+#     permission_id = Column("permission_id", Integer, ForeignKey("permissions.id"))
+#     role_id = Column("role_id", Integer, ForeignKey("roles.id"))
+#
 
 
 class LoginRecord(Base):

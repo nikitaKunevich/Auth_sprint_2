@@ -7,6 +7,7 @@ from api_v1.models import FilmDetails, FilmShort
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from services.film import FilmService, get_film_service
 from starlette.requests import Request
+from utils import can_read_suspicious
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -19,7 +20,7 @@ async def film_details(
     film_service: FilmService = Depends(get_film_service),
 ) -> FilmDetails:
     film = await film_service.get_by_id(
-        str(film_id), filter_suspicious=not request.user.is_authenticated
+        str(film_id), filter_suspicious=not can_read_suspicious(request.auth)
     )
     if not film:
         raise HTTPException(
@@ -46,7 +47,7 @@ async def film_search(
         page_size=page_size,
         page_number=page_number,
         genre_filter=str(filter_genre) if filter_genre else None,
-        filter_suspicious=not request.user.is_authenticated,
+        filter_suspicious=not can_read_suspicious(request.auth),
     )
     if not films:
         raise HTTPException(

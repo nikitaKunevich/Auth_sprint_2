@@ -15,7 +15,7 @@ from flask_jwt_extended import current_user, get_jwt, jwt_required
 from storage import db, db_models
 from storage.db_models import LoginRecord
 from utils import get_oauth, parse_obj_raise
-from werkzeug.exceptions import Forbidden
+from werkzeug.exceptions import BadRequest, Forbidden
 
 logger = logging.getLogger(__name__)
 
@@ -301,20 +301,34 @@ def revoke_refresh_token():
 
 @v1.route("/oauth_login", methods=["GET"])
 def oauth_login():
-    """oauth_login
+    """Logging in with openid provider
     ---
     get:
-      description: Logging in with google openid
-      summary: Method for logging in with google openid
+      description: Logging in with openid provider
+      summary: Logging in with openid provider
+      parameters:
+        - name: provider
+          in: query
+          description: OIDC provider name
+          schema:
+            type: string
+            enum: [google]
       responses:
         200:
           description: OK
       tags:
         - openid
     """
-    google = get_oauth().create_client("google")
-    redirect_uri = url_for(".oauth_redirect", _external=True)
-    return google.authorize_redirect(redirect_uri=redirect_uri)
+    provider_name = request.args["provider"]
+    if not provider_name:
+        raise BadRequest("No provider is filled")
+    oauth = get_oauth()
+    try:
+        oauth_provider = getattr(oauth, provider_name)
+    except AttributeError:
+        raise BadRequest(description="Unknown OIDC provider name")
+    redirect_uri = url_for(".oauth_redirect", provider=provider_name, _external=True)
+    return oauth_provider.authorize_redirect(redirect_uri=redirect_uri)
 
 
 @v1.route("/oauth_redirect", methods=["GET"])
@@ -325,7 +339,13 @@ def oauth_redirect():
       description: Redirect URL for openid
       summary: Redirect URL for openid. If user exists - returns token pair,\
        if user is new — creates user.
-
+      parameters:
+        - name: provider
+          in: query
+          description: OIDC provider name
+          schema:
+            type: string
+            enum: [google]
       responses:
         200:
           description: Return new tokens
@@ -349,9 +369,14 @@ def oauth_redirect():
       tags:
         - openid
     """
+    provider_name = request.args["provider"]
     oauth = get_oauth()
-    token = oauth.google.authorize_access_token()
-    user_info = oauth.google.parse_id_token(token)
+    try:
+        oauth_provider = getattr(oauth, provider_name)
+    except AttributeError:
+        raise BadRequest(description="Unknown OIDC provider name")
+    token = oauth_provider.authorize_access_token()
+    user_info = oauth_provider.parse_id_token(token)
 
     third_party_id = user_info["sub"]
     user = db_models.User.get_user_universal(third_party_id=third_party_id)
@@ -364,10 +389,8 @@ def oauth_redirect():
             TokenGrantOut(access_token=access_token, refresh_token=refresh_token).dict()
         )
     else:
-        email = user_info["email"] if user_info["email_verified"] else None
-
         user = auth.create_user_from_third_party(
-            third_party_id=third_party_id, email=email
+            third_party_account_id=third_party_id, user_info=user_info
         )
         resp = make_response("Created", 201)
         resp.headers["Location"] = f"{url_for('.get_user_info', user_id=user.id)}"
@@ -380,7 +403,7 @@ def oauth_redirect():
 
 @v1.route("/role", methods=["POST"])
 @jwt_required()
-@auth.require_roles("admin")
+@auth.require_permissions("role:write")
 def create_role():
     """Create new role
     ---
@@ -414,7 +437,7 @@ def create_role():
 # remove role
 @v1.route("/role/<role_id>", methods=["DELETE"])
 @jwt_required()
-@auth.require_roles("admin")
+@auth.require_permissions("role:write")
 def remove_role(role_id: int):
     """Remove role
     ---
@@ -445,7 +468,7 @@ def remove_role(role_id: int):
 # add role to user
 @v1.route("/role/<role_name>/user/<user_id>", methods=["PUT"])
 @jwt_required()
-@auth.require_roles("admin")
+@auth.require_permissions("role:write")
 def add_role_to_user(role_name: str, user_id: str):
     """Add role to user
     ---
@@ -481,7 +504,7 @@ def add_role_to_user(role_name: str, user_id: str):
 # remove role from user
 @v1.route("/role/<role_name>/user/<user_id>", methods=["DELETE"])
 @jwt_required()
-@auth.require_roles("admin")
+@auth.require_permissions("role:write")
 def remove_role_from_user(role_name: str, user_id: str):
     """Remove role from user
     ---
@@ -512,4 +535,76 @@ def remove_role_from_user(role_name: str, user_id: str):
     """
 
     auth.remove_role_from_user(role_name, user_id)
+    return "OK", 200
+
+
+@v1.route("/role/<role_name>/permission/<permission_name>", methods=["PUT"])
+@jwt_required()
+@auth.require_permissions("role:write")
+def add_permission_to_role(role_name: str, permission_name: str):
+    """Add permission to role
+    ---
+    delete:
+      description: Add permission to role
+      summary: Add permission to role
+      security:
+        - jwt_access: []
+      parameters:
+        - name: role_name
+          in: path
+          description: role_name
+          schema:
+            type: string
+        - name: permission_name
+          in: path
+          description: permission_name
+          schema:
+            type: string
+
+      responses:
+        200:
+          description: OK
+        401:
+          description: Unauthorized
+      tags:
+        - role
+    """
+
+    auth.add_permission_to_role(role_name, permission_name)
+    return "OK", 200
+
+
+@v1.route("/role/<role_name>/permissions/<permission_name>", methods=["DELETE"])
+@jwt_required()
+@auth.require_permissions("role:write")
+def remove_permission_from_role(role_name: str, permission_name: str):
+    """remove_permission_from_role
+    ---
+    delete:
+      description: remove_permission_from_role
+      summary: remove_permission_from_role
+      security:
+        - jwt_access: []
+      parameters:
+        - name: role_name
+          in: path
+          description: role_name
+          schema:
+            type: string
+        - name: permission_name
+          in: path
+          description: permission_name
+          schema:
+            type: string
+
+      responses:
+        200:
+          description: OK
+        401:
+          description: Unauthorized
+      tags:
+        - role
+    """
+
+    auth.remove_permission_from_role(role_name, permission_name)
     return "OK", 200

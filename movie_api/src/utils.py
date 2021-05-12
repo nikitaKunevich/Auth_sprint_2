@@ -1,13 +1,17 @@
 import asyncio
 import functools
 import inspect
+import logging
 import typing
 
-from starlette.authentication import has_required_scope
+import permissions
+from starlette.authentication import AuthCredentials, has_required_scope
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 from starlette.websockets import WebSocket
+
+logger = logging.getLogger(__name__)
 
 
 def require_roles(
@@ -82,3 +86,8 @@ def require_roles(
             return sync_wrapper
 
     return decorator
+
+
+def can_read_suspicious(auth: AuthCredentials) -> bool:
+    logger.info(f"can_read_suspicious, scopes: {auth.scopes}")
+    return permissions.Permissions.SUSPICIOUS_READ in auth.scopes

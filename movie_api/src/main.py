@@ -10,6 +10,7 @@ from elasticsearch import AsyncElasticsearch
 from fastapi import FastAPI
 from fastapi.responses import ORJSONResponse
 from jwt import PyJWTError
+from permissions import Permissions
 from registry import filter_suspicious
 from starlette.authentication import (
     AuthCredentials,
@@ -20,7 +21,7 @@ from starlette.authentication import (
 from starlette.middleware.authentication import AuthenticationMiddleware
 
 
-class BasicAuthBackend(AuthenticationBackend):
+class JWTAuthBackend(AuthenticationBackend):
     async def authenticate(self, request):
         # Get JWT token from user's cookies
 
@@ -54,10 +55,13 @@ class BasicAuthBackend(AuthenticationBackend):
             raise AuthenticationError("Invalid credentials")
 
         # In case if token is valid returns an object of the authorized user
-        filter_suspicious.set(False)
-        roles = jwt_decoded["roles"].append("authenticated")
-        logging.debug(f"token is valid, user: {jwt_decoded['sub']} roles: {roles}")
-        return AuthCredentials(roles), SimpleUser(jwt_decoded["sub"])
+        permissions = jwt_decoded["permissions"]
+        if Permissions.SUSPICIOUS_READ in permissions:
+            filter_suspicious.set(False)
+        logging.debug(
+            f"token is valid, user: {jwt_decoded['sub']} permissions: {permissions}, jwt: {jwt_decoded}"
+        )
+        return AuthCredentials(permissions), SimpleUser(jwt_decoded["sub"])
 
 
 app = FastAPI(
@@ -66,7 +70,7 @@ app = FastAPI(
     openapi_url="/swagger.json",
     default_response_class=ORJSONResponse,
 )
-app.add_middleware(AuthenticationMiddleware, backend=BasicAuthBackend())
+app.add_middleware(AuthenticationMiddleware, backend=JWTAuthBackend())
 
 
 @app.on_event("startup")

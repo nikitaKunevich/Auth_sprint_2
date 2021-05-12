@@ -1,7 +1,8 @@
 import logging
 from functools import wraps
-from typing import Optional, Union
+from typing import Union
 
+import permissions
 import token_store
 from api.models import RoleIn, RoleOut
 from exceptions import AlreadyExistsError, PasswordAuthenticationError, TokenError
@@ -46,20 +47,23 @@ def create_user(email: str, password: str, admin: bool = False) -> User:
     return user
 
 
-def create_user_from_third_party(
-    third_party_id: str, email: Optional[str] = None
-) -> User:
+def create_user_from_third_party(third_party_account_id: str, user_info: dict) -> User:
     hashed_pass = hash_password(generate_random_password())
+    email = user_info["email"] if user_info["email_verified"] else None
     if email:
         user_exists = User.get_user_universal(email) is not None
         if user_exists:
             raise AlreadyExistsError(f"User with email: {email} already exists")
-
+    account = ThirdPartyAccount(
+        id=third_party_account_id,
+        third_party_name=user_info["iss"],
+        user_info=user_info,
+    )
     user = User(
         email=email,
         hashed_password=hashed_pass,
         should_change_password=True,
-        third_party_accounts=[ThirdPartyAccount(id=third_party_id)],
+        third_party_accounts=[account],
     )
     db.session.add(user)
     db.session.commit()
@@ -144,9 +148,9 @@ def delete_role(role_id: int):
     db.session.commit()
 
 
-def require_roles(role_list: Union[str, list]):
-    if isinstance(role_list, str):
-        role_list = [role_list]
+def require_permissions(permission_list: Union[str, list]):
+    if isinstance(permission_list, str):
+        permission_list = [permission_list]
 
     def wrapper(fn):
         @wraps(fn)
@@ -154,9 +158,9 @@ def require_roles(role_list: Union[str, list]):
             user: User = current_user
             if not user:
                 raise TokenError("You should provide valid access_token", "")
-            required_roles_set = set(role_list)
-            user_roles_set = {role.name for role in user.roles}
-            if not required_roles_set.issubset(user_roles_set):
+            required_permissions_set = set(permission_list)
+            user_permissions_set = {permission for permission in user.permissions}
+            if not required_permissions_set.issubset(user_permissions_set):
                 raise Forbidden("User doesn't have access to the resource")
             return fn(*args, **kwargs)
 
@@ -166,9 +170,8 @@ def require_roles(role_list: Union[str, list]):
 
 
 def add_role_to_user(role_name, user_id):
-    role = db.session.query(Role).filter_by(name=role_name).one_or_none()
-    if not role:
-        raise NotFound(f"Role with name {role_name} is not found")
+    role = Role.get(role_name)
+
     user = User.get_by_id(user_id)
     if not user:
         raise NotFound(f"User with id {user_id} is not found")
@@ -178,12 +181,28 @@ def add_role_to_user(role_name, user_id):
 
 
 def remove_role_from_user(role_name, user_id):
-    role = db.session.query(Role).filter_by(name=role_name).one_or_none()
-    if not role:
-        raise NotFound(f"Role with name {role_name} is not found")
+    role = Role.get(role_name)
     user = User.get_by_id(user_id)
     if not user:
         raise NotFound(f"User with id {user_id} is not found")
     user.roles.remove(role)
     db.session.add(user)
+    db.session.commit()
+
+
+def add_permission_to_role(role_name, permission_name):
+    role = Role.get(role_name)
+    if permission_name not in permissions.Permissions.__members__:
+        raise NotFound(f"Permission with name {permission_name} is not found")
+    role.permissions.append(permission_name)
+    db.session.add(role)
+    db.session.commit()
+
+
+def remove_permission_from_role(role_name, permission_name):
+    role = Role.get(role_name)
+    if permission_name not in permissions.Permissions.__members__:
+        raise NotFound(f"Permission with name {permission_name} is not found")
+    role.permissions.remove(permission_name)
+    db.session.add(role)
     db.session.commit()
